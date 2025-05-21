@@ -1,14 +1,15 @@
 package io.github.adam_lally.bookscope
 
-import io.ktor.client.HttpClient
 import io.ktor.client.call.body
-import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.get
 import io.ktor.client.request.parameter
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.coroutines.withTimeout
+import io.github.adam_lally.bookscope.NetworkClients
+import io.github.adam_lally.bookscope.retryWithBackoff
 
 @Serializable
 data class OpenLibrarySearchResult(
@@ -20,24 +21,22 @@ data class OpenLibrarySearchResult(
  * Call the openlibrary API to search for books with the given title and author.
  */
 suspend fun searchBooks(title: String, author: String?): OpenLibrarySearchResult {
-    val client = HttpClient(CIO) {
-        install(ContentNegotiation) {
-            json(Json { ignoreUnknownKeys = true })
+    val client = NetworkClients.openLibraryHttpClient
+
+    val response: OpenLibrarySearchResult = withTimeout(15_000) {
+        retryWithBackoff {
+            client.get("https://openlibrary.org/search.json") {
+                parameter("limit", 3)
+                parameter("title", title)
+                if (author != "Unknown") parameter("author", author)
+            }.body()
         }
     }
 
-    val response: OpenLibrarySearchResult = client.get("https://openlibrary.org/search.json") {
-        parameter("limit", 3)
-        parameter("title", title)
-        if (author != "Unknown") parameter("author", author)
-    }.body()
-
-    client.close()
     return response
 }
 
 /**
- * Get [BookInfo] for the first book found with the given title and author.
  */
 suspend fun getBookInfo(title: String, author: String): BookInfo? {
     val searchResult = searchBooks(title, author)
