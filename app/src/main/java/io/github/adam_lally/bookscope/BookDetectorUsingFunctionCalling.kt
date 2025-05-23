@@ -25,6 +25,8 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import java.io.File
 import java.util.Base64
+import kotlin.time.DurationUnit
+import kotlin.time.toDuration
 
 /**
  * BookDetector implementation that uses the LLM function calling feature.
@@ -45,7 +47,7 @@ class BookDetectorUsingFunctionCalling: BookDetector {
             //Call the LLM to get its tool calls
             val openAi = OpenAI(
                 token = BuildConfig.OPENAI_API_KEY,
-                timeout = kotlin.time.Duration.Companion.seconds(30)
+                timeout = 30.toDuration(DurationUnit.SECONDS)
             )
             val modelId = ModelId("gpt-4o-mini")
             val chatMessages =  mutableListOf(
