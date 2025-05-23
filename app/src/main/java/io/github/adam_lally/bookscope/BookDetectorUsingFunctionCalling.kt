@@ -10,8 +10,9 @@ import com.aallam.openai.api.chat.ToolCall
 import com.aallam.openai.api.chat.ToolChoice
 import com.aallam.openai.api.chat.chatCompletionRequest
 import com.aallam.openai.api.model.ModelId
-import com.aallam.openai.client.OpenAI
-import com.example.bookscope.BuildConfig
+import io.github.adam_lally.bookscope.NetworkClients
+import io.github.adam_lally.bookscope.retryWithBackoff
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -38,14 +39,14 @@ class BookDetectorUsingFunctionCalling: BookDetector {
     override suspend fun detectBooksInImage(imageUrl: String): BookDetectorResult = coroutineScope {
         try {
             //Call the LLM to get its tool calls
-            val openAi = OpenAI(BuildConfig.OPENAI_API_KEY)
-            val modelId = ModelId("gpt-4o-mini")
+            val openAi = NetworkClients.openAI
+            val modelId = ModelId("gpt-4o")
             val chatMessages =  mutableListOf(
                 ChatMessage(
                     role = ChatRole.System,
-                    content = "You are a helpful assistant who identifies all of the books in an image. " +
+                    content = "You are a helpful assistant who identifies all of the books clearly visible in an image. " +
                             "Use the provided tool to get information about a book given the title and author. " +
-                            "Only return results where there is a good match between the book in the image and the book info from the tool."
+                            "Only return results when you are confident the book is present and matches the tool information."
                 ),
                 ChatMessage(
                     role = ChatRole.User,
@@ -63,7 +64,9 @@ class BookDetectorUsingFunctionCalling: BookDetector {
                 messages = chatMessages
                 tools(getBookInfoToolBuilder())
             }
-            val completion: ChatCompletion = openAi.chatCompletion(chatCompletionRequest)
+            val completion: ChatCompletion = withTimeout(60_000) {
+                retryWithBackoff { openAi.chatCompletion(chatCompletionRequest) }
+            }
             val message =  completion.choices.first().message
             if (message.toolCalls.isNullOrEmpty()) {
                 BookDetectorResult(message = message.content ?: "No books detected")
@@ -105,7 +108,9 @@ class BookDetectorUsingFunctionCalling: BookDetector {
                     tools(foundBooksToolBuilder())
                     toolChoice = ToolChoice.function("foundBooks")
                 }
-                val secondResponse = openAi.chatCompletion(secondChatCompletionRequest)
+                val secondResponse = withTimeout(60_000) {
+                retryWithBackoff { openAi.chatCompletion(secondChatCompletionRequest) }
+            }
                 val toolCall = secondResponse.choices.first().message.toolCalls?.firstOrNull()
                 require(toolCall is ToolCall.Function)
                 val bookInfos = Json.decodeFromString<BookInfos>(toolCall.function.arguments)
