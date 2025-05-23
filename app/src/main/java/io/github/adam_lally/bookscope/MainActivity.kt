@@ -236,6 +236,11 @@ class MainActivity : ComponentActivity() {
 
                 override fun onError(exception: ImageCaptureException) {
                     Log.e(TAG, "Photo capture failed: ${exception.message}", exception)
+                    // Update UI to show error message
+                    displayText = "Error capturing image: ${exception.message}"
+                    bookInfoList = emptyList()
+                    openResultDialog.value = true
+                    loading = false
                     super.onError(exception)
                 }
             })
@@ -243,13 +248,35 @@ class MainActivity : ComponentActivity() {
 
     private fun getBookInfo(imageBytes: ByteArray, callback: (BookDetectorResult)->Unit) {
         lifecycleScope.launch {
-            callback(bookDetector.detectBooksInImage(imageBytes))
+            val result = bookDetector.detectBooksInImage(imageBytes)
+            if (result.bookInfo.isEmpty() && !result.message.startsWith("Error:")) {
+                callback(BookDetectorResult(emptyList(), "Detection Error: ${result.message}"))
+            } else {
+                callback(result)
+            }
         }
     }
 
     private fun getImageDescription(imageBytes: ByteArray, callback: (String) -> Unit) {
         lifecycleScope.launch {
-            callback(describeImage(imageBytes))
+            try {
+                val description = describeImage(imageBytes)
+                if (description.startsWith("Error:")) {
+                    // Potentially redundant if describeImage already formats errors, but ensures clarity.
+                    callback(description)
+                } else {
+                    callback(description)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error describing image: ${e.message}", e)
+                // Ensure UI updates to show this error
+                displayText = "Error describing image: ${e.message}"
+                bookInfoList = emptyList()
+                openResultDialog.value = true
+                loading = false
+                // Optionally, call callback with an error string if the callback expects a string in all cases
+                // callback("Error describing image: ${e.message}")
+            }
         }
     }
 

@@ -8,17 +8,9 @@ import java.util.Base64
  */
 interface BookDetector {
     /**
-     * Detect books in the imaae at [imageUrl].
-     */
-    suspend fun detectBooksInImage(imageUrl : String): BookDetectorResult
-
-    /**
      * Detect books in the image represented by [imageBytes].
      */
-    suspend fun detectBooksInImage(imageBytes : ByteArray) : BookDetectorResult {
-        val base64image = Base64.getEncoder().encodeToString(imageBytes)
-        return detectBooksInImage("data:image/jpeg;base64,$base64image")
-    }
+    suspend fun detectBooksInImage(imageBytes : ByteArray) : BookDetectorResult
 }
 
 @Serializable

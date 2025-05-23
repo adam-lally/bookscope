@@ -24,6 +24,7 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import java.io.File
+import java.util.Base64
 
 /**
  * BookDetector implementation that uses the LLM function calling feature.
@@ -35,16 +36,24 @@ import java.io.File
  * the results.
  */
 class BookDetectorUsingFunctionCalling: BookDetector {
-    override suspend fun detectBooksInImage(imageUrl: String): BookDetectorResult = coroutineScope {
+    override suspend fun detectBooksInImage(imageBytes: ByteArray): BookDetectorResult = coroutineScope {
         try {
+            // Convert imageBytes to Base64 data URI for the LLM call
+            val base64Image = Base64.getEncoder().encodeToString(imageBytes)
+            val imageDataUrl = "data:image/jpeg;base64,$base64Image"
+
             //Call the LLM to get its tool calls
-            val openAi = OpenAI(BuildConfig.OPENAI_API_KEY)
+            val openAi = OpenAI(
+                token = BuildConfig.OPENAI_API_KEY,
+                timeout = kotlin.time.Duration.Companion.seconds(30)
+            )
             val modelId = ModelId("gpt-4o-mini")
             val chatMessages =  mutableListOf(
                 ChatMessage(
                     role = ChatRole.System,
                     content = "You are a helpful assistant who identifies all of the books in an image. " +
-                            "Use the provided tool to get information about a book given the title and author. " +
+                            "Only identify books you are reasonably confident you can see clearly. " +
+                            "For each identified book, use the provided 'getBookInfo' tool to get its information. " +
                             "Only return results where there is a good match between the book in the image and the book info from the tool."
                 ),
                 ChatMessage(
@@ -52,7 +61,7 @@ class BookDetectorUsingFunctionCalling: BookDetector {
                     messageContent = ListContent(
                         listOf(
                             ImagePart(
-                                url = imageUrl,
+                                url = imageDataUrl, // Use the Base64 encoded data URI
                                 detail = "high")
                         )
                     )
@@ -75,14 +84,25 @@ class BookDetectorUsingFunctionCalling: BookDetector {
                         require(toolCall is ToolCall.Function)
                         val functionCall = toolCall.function
                         require(functionCall.name == "getBookInfo")
-                        val functionArgs = functionCall.argumentsAsJson()
-                        val title = functionArgs["title"]?.jsonPrimitive?.content
-                        val author = functionArgs["author"]?.jsonPrimitive?.content
+                        var title: String? = null
+                        var author: String? = null
+                        try {
+                            val functionArgs = functionCall.argumentsAsJson()
+                            title = functionArgs["title"]?.jsonPrimitive?.content
+                            author = functionArgs["author"]?.jsonPrimitive?.content
+                        } catch (e: Exception) {
+                            // Log warning using android.util.Log, assuming TAG is defined in the class
+                            // For now, using println for simplicity as Log requires Android context or static import
+                            println("Warning: Failed to parse arguments for tool call: ${toolCall.id}, Error: ${e.message}")
+                        }
+
                         async {
                             if (title != null && author != null) {
                                 getBookInfo(title, author)
                             } else {
-                                BookInfos(emptyList())
+                                // Log that getBookInfo was skipped due to missing title/author
+                                println("Info: Skipping getBookInfo for tool call ${toolCall.id} due to missing title or author after parsing.")
+                                BookInfos(emptyList()) // Return empty if parsing failed or title/author null
                             }
                         }
                     }
@@ -99,6 +119,19 @@ class BookDetectorUsingFunctionCalling: BookDetector {
                         )
                     }
                 }
+                // Add user message to guide the second LLM call
+                chatMessages.add(
+                    ChatMessage(
+                        role = ChatRole.User, // Or ChatRole.Assistant, depending on desired conversational flow
+                        content = "Okay, I have the results from 'getBookInfo'. Now, using the 'foundBooks' tool, " +
+                                "report all the books that were *successfully* verified and matched with the " +
+                                "information from 'getBookInfo'. If 'getBookInfo' returned no information or " +
+                                "information that doesn't seem to match the book you saw in the image, " +
+                                "do not include that book in your 'foundBooks' call. Only list books where the " +
+                                "details from 'getBookInfo' (like title and author) are consistent with what " +
+                                "you identified in the image."
+                    )
+                )
                 val secondChatCompletionRequest = chatCompletionRequest {
                     model = modelId
                     messages = chatMessages

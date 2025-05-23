@@ -8,14 +8,22 @@ import java.io.File
 
 /**
  * BookDetector implementation that first calls the LLM to identify book titles and authors,
+import java.util.Base64
+
+/**
+ * BookDetector implementation that first calls the LLM to identify book titles and authors,
  * then queries OpenLibrary to get the BookInfo for each book detected.
  */
 class BasicBookDetector : BookDetector {
-    override suspend fun detectBooksInImage(imageUrl: String): BookDetectorResult = coroutineScope {
+    override suspend fun detectBooksInImage(imageBytes: ByteArray): BookDetectorResult = coroutineScope {
         try {
+            // Convert imageBytes to Base64 data URI for findBooksInImage
+            val base64Image = Base64.getEncoder().encodeToString(imageBytes)
+            val imageDataUrl = "data:image/jpeg;base64,$base64Image"
+
             // Call the LLM to find books in the image
             val books =
-                findBooksInImage(imageUrl)
+                findBooksInImage(imageDataUrl)
 
             if (books.isEmpty()) {
                 BookDetectorResult(message = "No books found")
